@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Q&amp;A Assistant (RAG)</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-dark: #0284c7;
+      --success: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+    header {
+      margin-bottom: 28px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.75rem; }
+    .subtitle { color: var(--muted); margin: 0; font-size: 0.95rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 1.1rem; }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    input[type="file"], input[type="text"], select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+    input[type="text"] { flex: 1; min-width: 240px; }
+    button {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--accent-dark); color: #fff; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { margin-top: 10px; font-size: 0.9rem; color: var(--success); }
+    .answer-box {
+      margin-top: 16px;
+      padding: 16px;
+      background: var(--bg);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      display: none;
+    }
+    .sources { margin-top: 14px; display: grid; gap: 10px; }
+    .source-item {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.88rem;
+    }
+    .source-meta {
+      display: flex;
+      justify-content: space-between;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Document Q&amp;A Assistant with RAG</h1>
+      <p class="subtitle">Upload PDF/TXT documents, build a FAISS vector index, and ask grounded questions.</p>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>1. Upload &amp; Index Documents</h2>
+        <div class="row">
+          <input type="file" id="fileInput" multiple accept=".pdf,.txt,.md" />
+          <button id="uploadBtn" onclick="uploadFiles()">Upload &amp; Index</button>
+        </div>
+        <div id="indexStats" class="status">Loading index stats...</div>
+      </section>
+
+      <section class="card">
+        <h2>2. Ask a Question</h2>
+        <div class="row">
+          <input type="text" id="questionInput" placeholder="Ask something about your documents..." />
+          <select id="topK">
+            <option value="2">Top 2 chunks</option>
+            <option value="3" selected>Top 3 chunks</option>
+            <option value="5">Top 5 chunks</option>
+          </select>
+          <button id="askBtn" onclick="askQuestion()">Ask</button>
+        </div>
+
+        <div id="answerBox" class="answer-box">
+          <strong>Answer:</strong>
+          <p id="answerText" style="margin: 8px 0 0;"></p>
+        </div>
+        <div id="sourcesList" class="sources"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    async function loadStats() {
+      const res = await fetch("/stats");
+      const data = await res.json();
+      const docs = data.documents.length ? data.documents.join(", ") : "None";
+      document.getElementById("indexStats").textContent =
+        `Indexed ${data.indexed_chunks} chunks from: ${docs}`;
+    }
+
+    async function uploadFiles() {
+      const input = document.getElementById("fileInput");
+      if (!input.files.length) return alert("Please select at least one PDF or TXT file.");
+
+      const btn = document.getElementById("uploadBtn");
+      btn.disabled = true;
+      btn.textContent = "Indexing...";
+
+      const formData = new FormData();
+      for (const f of input.files) formData.append("files", f);
+
+      try {
+        const res = await fetch("/upload", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Upload failed");
+        await loadStats();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Upload & Index";
+      }
+    }
+
+    async function askQuestion() {
+      const q = document.getElementById("questionInput").value.trim();
+      const topK = parseInt(document.getElementById("topK").value, 10);
+      if (!q) return;
+
+      const btn = document.getElementById("askBtn");
+      btn.disabled = true;
+      btn.textContent = "Thinking...";
+
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q, top_k: topK })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Request failed");
+
+        document.getElementById("answerText").textContent = data.answer;
+        document.getElementById("answerBox").style.display = "block";
+
+        const sourcesEl = document.getElementById("sourcesList");
+        sourcesEl.innerHTML = data.sources.map(s => `
+          <div class="source-item">
+            <div class="source-meta">
+              <span>${s.source} (Chunk #${s.chunk_id})</span>
+              <span>Similarity: ${s.score}</span>
+            </div>
+            <div>${s.text}</div>
+          </div>
+        `).join("");
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Ask";
+      }
+    }
+
+    document.getElementById("questionInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") askQuestion();
+    });
+
+    loadStats();
+  </script>
+</body>
+</html>

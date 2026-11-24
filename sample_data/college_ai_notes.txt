@@ -1,0 +1,14 @@
+Retrieval-Augmented Generation (RAG) Overview
+Retrieval-Augmented Generation (RAG) is an NLP architecture that combines information retrieval with text generation. Instead of relying solely on parameters memorized during LLM pre-training, RAG fetches relevant passages from an external knowledge base at query time and injects them into the prompt.
+
+Why Use RAG Instead of Pure Fine-Tuning?
+1. Up-to-date knowledge: Documents can be updated or replaced without retraining the entire language model.
+2. Reduced hallucinations: The generator is grounded in retrieved evidence and can cite exact source passages.
+3. Lower compute cost: Building a FAISS vector index takes seconds on a CPU, whereas pre-training an LLM requires massive GPU clusters.
+
+Key Components of a RAG Pipeline
+- Document Loader: Parses PDF, DOCX, or TXT files into raw text.
+- Text Splitter: Breaks long documents into overlapping chunks (e.g., 400-600 characters with 80-100 character overlap).
+- Embedding Model: Converts text chunks into dense vectors (for example, all-MiniLM-L6-v2).
+- Vector Store: Indexes vectors for fast similarity search (FAISS, Chroma, or Pinecone).
+- Generator (LLM): Synthesizes the final answer using the user question and retrieved context.
